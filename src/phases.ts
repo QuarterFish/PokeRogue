@@ -4534,6 +4534,38 @@ export class AddEnemyBuffModifierPhase extends Phase {
   }
 }
 
+export class PartyStatusCurePhase extends BattlePhase {
+  private user: Pokemon;
+  private message: string;
+  private abilityCondition: Abilities;
+
+  constructor(scene: BattleScene, user: Pokemon, message: string, abilityCondition: Abilities) {
+    super(scene);
+
+    this.user = user;
+    this.message = message;
+    this.abilityCondition = abilityCondition;
+  }
+
+  start() {
+    super.start();
+    for (let pokemon of this.scene.getParty()) {
+      if (!pokemon.isOnField() || pokemon === this.user) {
+        pokemon.resetStatus(false);
+        pokemon.updateInfo(true);
+      } else {
+        if (pokemon.getAbility().id !== this.abilityCondition) {
+          pokemon.resetStatus();
+          pokemon.updateInfo(true);
+        }
+      }
+    }
+    if (this.message)
+      this.scene.queueMessage(this.message);
+    this.end();
+  }
+}
+
 export class PartyHealPhase extends BattlePhase {
   private resumeBgm: boolean;
 
