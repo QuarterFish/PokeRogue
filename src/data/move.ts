@@ -826,9 +826,40 @@ export class HealAttr extends MoveEffectAttr {
       Math.max(Math.floor(target.getMaxHp() * healRatio), 1), getPokemonMessage(target, ' regained\nhealth!'), true, !this.showAnim));
   }
 
+  getHealRatio(h: number = -1){
+    if (h > 0)
+      this.healRatio = h;
+
+    return this.healRatio;
+  }
+
   getTargetBenefitScore(user: Pokemon, target: Pokemon, move: Move): integer {
     let score = ((1 - (this.selfTarget ? user : target).getHpRatio()) * 20) - this.healRatio * 10;
     return Math.round(score / (1 - this.healRatio / 2));
+  }
+}
+
+export class SwallowHealAttr extends HealAttr {
+  apply(user: Pokemon, target: Pokemon, move: Move, args: any[]): boolean {
+    const s = this.getStockpiles(user);
+
+    this.getHealRatio(s > 2 ? 1 : (s * 0.25));
+
+    super.apply(user, target, move, args);
+    return true;
+  }
+
+  getStockpiles(user: Pokemon): integer {
+    let s = 0;
+    const stock = [BattlerTagType.STOCKPILE_ONE, BattlerTagType.STOCKPILE_TWO, BattlerTagType.STOCKPILE_THREE];
+
+    for (let x = 0 ; x < stock.length ; x++){
+      if (user.getTag(stock[x])){
+        s++;
+      }
+    }
+
+    return s;
   }
 }
 
@@ -1616,6 +1647,39 @@ export class GrowthStatChangeAttr extends StatChangeAttr {
   }
 }
 
+export class StockpileStatChangeAttr extends StatChangeAttr {
+  constructor(move: string = "Stockpile") {
+    let l = 1;
+
+    if (move === "Spit-Up" || move === "Swallow"){
+      l = -1;
+    }
+
+    super([ BattleStat.ATK, BattleStat.SPATK ], l, true);
+  }
+
+  apply(user: Pokemon, target: Pokemon, move: Move, args: any[]): boolean | Promise<boolean> {
+    if (!super.apply(user, target, move, args))
+      return false;
+    
+    this.levels = this.levels < 0 ? (this.getStockpiles(user) * -1) : 1;
+    return true;
+  }
+
+  getStockpiles(user: Pokemon): integer {
+    let s = 0;
+    const stock = [BattlerTagType.STOCKPILE_ONE, BattlerTagType.STOCKPILE_TWO, BattlerTagType.STOCKPILE_THREE];
+
+    for (let x = 0 ; x < stock.length ; x++){
+      if (user.getTag(stock[x])){
+        s++;
+      }
+    }
+
+    return s;
+  }
+}
+
 export class HalfHpStatMaxAttr extends StatChangeAttr {
   constructor(stat: BattleStat) {
     super(stat, 12, true, null, false);
@@ -2144,6 +2208,28 @@ export class WaterShurikenPowerAttr extends VariablePowerAttr {
       return true;
     }
     return false;
+  }
+}
+
+export class SpitUpPowerAttr extends VariablePowerAttr {
+  apply(user: Pokemon, target: Pokemon, move: Move, args: any[]): boolean {
+    const power = args[0] as Utils.NumberHolder;
+
+    power.value = this.getPower(user, target, move);
+
+    return true;
+  }
+
+  getPower(user: Pokemon, target: Pokemon, move: Move): number {
+    if (!!user.getTag(BattlerTagType.STOCKPILE_THREE)){
+      return 300;
+    } else if (!!user.getTag(BattlerTagType.STOCKPILE_TWO)){
+      return 200;
+    } else if (!!user.getTag(BattlerTagType.STOCKPILE_ONE)){
+      return 100;
+    } else {
+      return 0;
+    }
   }
 }
 
@@ -2762,6 +2848,9 @@ export class AddBattlerTagAttr extends MoveEffectAttr {
       case BattlerTagType.INGRAIN:
       case BattlerTagType.IGNORE_ACCURACY:
       case BattlerTagType.AQUA_RING:
+      case BattlerTagType.STOCKPILE_ONE:
+      case BattlerTagType.STOCKPILE_TWO:
+      case BattlerTagType.STOCKPILE_THREE:
         return 3;
       case BattlerTagType.PROTECTED:
       case BattlerTagType.FLYING:
@@ -2936,6 +3025,45 @@ export class FaintCountdownAttr extends AddBattlerTagAttr {
     user.scene.queueMessage(getPokemonMessage(target, `\nwill faint in ${this.turnCountMin - 1} turns.`));
 
     return true;
+  }
+}
+
+export class StockpileAttr extends AddBattlerTagAttr {
+  constructor() {
+    super(BattlerTagType.STOCKPILE_THREE, true, true, 20, 20);
+  }
+
+  apply(user: Pokemon, target: Pokemon, move: Move, args: any[]): boolean {
+    const stock = this.getStockpiles(user);
+    let stockType = BattlerTagType.STOCKPILE_THREE;
+
+    switch (stock){
+      case 0:
+        stockType = BattlerTagType.STOCKPILE_ONE;
+        break;
+      case 1:
+        stockType = BattlerTagType.STOCKPILE_TWO;
+    }
+
+    if (!super.apply(user, target, move, args))
+      return false;
+
+    user.scene.queueMessage(getPokemonMessage(target, `\nstockpiled ${stock+1}.`));
+
+    return true;
+  }
+
+  getStockpiles(user: Pokemon): integer {
+    let s = 0;
+    const stock = [BattlerTagType.STOCKPILE_ONE, BattlerTagType.STOCKPILE_TWO, BattlerTagType.STOCKPILE_THREE];
+
+    for (let x = 0 ; x < stock.length ; x++){
+      if (user.getTag(stock[x])){
+        s++;
+      }
+    }
+
+    return s;
   }
 }
 
@@ -4749,12 +4877,28 @@ export function initMoves() {
       .target(MoveTarget.RANDOM_NEAR_ENEMY)
       .partial(),
     new SelfStatusMove(Moves.STOCKPILE, Type.NORMAL, -1, 20, -1, 0, 3)
-      .unimplemented(),
+      .attr(StockpileAttr)
+      .attr(StockpileStatChangeAttr, 'Stockpile')
+      .partial(),
     new AttackMove(Moves.SPIT_UP, Type.NORMAL, MoveCategory.SPECIAL, -1, 100, 10, -1, 0, 3)
-      .unimplemented(),
+      .attr(SpitUpPowerAttr)
+      .attr(StockpileStatChangeAttr, 'Spit-Up')
+      .attr(RemoveBattlerTagAttr, [ 
+        BattlerTagType.STOCKPILE_ONE,
+        BattlerTagType.STOCKPILE_TWO,
+        BattlerTagType.STOCKPILE_THREE,
+      ], true)
+      .partial(),
     new SelfStatusMove(Moves.SWALLOW, Type.NORMAL, -1, 10, -1, 0, 3)
+      .attr(SwallowHealAttr, 1)
+      .attr(StockpileStatChangeAttr, 'Swallow')
+      .attr(RemoveBattlerTagAttr, [ 
+        BattlerTagType.STOCKPILE_ONE,
+        BattlerTagType.STOCKPILE_TWO,
+        BattlerTagType.STOCKPILE_THREE,
+      ], true)
       .triageMove()
-      .unimplemented(),
+      .partial(),
     new AttackMove(Moves.HEAT_WAVE, Type.FIRE, MoveCategory.SPECIAL, 95, 90, 10, 10, 0, 3)
       .attr(HealStatusEffectAttr, true, StatusEffect.FREEZE)
       .attr(StatusEffectAttr, StatusEffect.BURN)
